@@ -25,6 +25,24 @@ Other targets are passed through to Buildroot: `make menuconfig`, `make linux-me
 `make lprint-rebuild all`, … After `menuconfig`, run `make savedefconfig` to write the change
 back to `external/configs/mobix_pi0w_defconfig`. Downloads are cached in `dl/`.
 
+## Releases
+
+GitHub Actions builds the image only for version tags (`.github/workflows/build.yml`):
+
+```sh
+git tag v1.0 && git push origin v1.0
+```
+
+The image is attached to the GitHub Release for that tag as `mobix-v1.0.img.xz` with a
+`.sha256` file. Flash it with:
+
+```sh
+xz -dc mobix-v1.0.img.xz | sudo dd of=/dev/sdX bs=4M conv=fsync
+```
+
+"Run workflow" on the Actions page builds any branch and keeps the image as a workflow artifact
+without creating a release.
+
 ## Rust app
 
 The app comes from its own git repository (the repo must contain `Cargo.lock`, the build uses `--locked`):

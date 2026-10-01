@@ -1,3 +1,6 @@
 /output/
 /dl/
 /local.mk
+# Real credentials for the SD card, kept next to the tree
+/wpa_supplicant.conf
+/authorized_keys
