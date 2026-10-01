@@ -1,0 +1,37 @@
+config BR2_PACKAGE_MOBIX_APP
+	bool "mobix-app"
+	depends on BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS
+	select BR2_PACKAGE_HOST_RUSTC
+	help
+	  The mobix Rust application. Built with cargo from a git
+	  repository; supervised by BusyBox init (respawn).
+
+	  For local development, set MOBIX_APP_OVERRIDE_SRCDIR in the
+	  top-level local.mk to a checkout of the app.
+
+if BR2_PACKAGE_MOBIX_APP
+
+config BR2_PACKAGE_MOBIX_APP_GIT_URL
+	string "git URL"
+	help
+	  Git repository of the Rust app.
+
+config BR2_PACKAGE_MOBIX_APP_GIT_VERSION
+	string "git revision"
+	default "main"
+	help
+	  Commit, tag or branch to build. Use a commit hash (or tag)
+	  for reproducible builds: branch downloads are cached in dl/
+	  and not refreshed.
+
+config BR2_PACKAGE_MOBIX_APP_BIN
+	string "binary name"
+	default "mobix-app"
+	help
+	  Name of the cargo binary target installed as
+	  /usr/bin/mobix-app.
+
+endif
+
+comment "mobix-app needs a toolchain supported by Rust"
+	depends on !BR2_PACKAGE_HOST_RUSTC_TARGET_ARCH_SUPPORTS

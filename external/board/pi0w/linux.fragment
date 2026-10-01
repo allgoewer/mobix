@@ -1,0 +1,37 @@
+# Applied on top of bcmrpi_defconfig
+
+# Fast initramfs decompression (kernel LZ4: BR2_LINUX_KERNEL_LZ4 in the defconfig)
+CONFIG_BLK_DEV_INITRD=y
+CONFIG_RD_LZ4=y
+CONFIG_PRINTK_TIME=y
+
+# /boot (FAT) must be mountable without loading modules
+CONFIG_VFAT_FS=y
+CONFIG_NLS_CODEPAGE_437=y
+CONFIG_NLS_ISO8859_1=y
+
+# Wi-Fi built in: no module loading on the path to network
+# (cfg80211 can only be built in if rfkill is too)
+CONFIG_RFKILL=y
+CONFIG_CFG80211=y
+CONFIG_BRCMUTIL=y
+CONFIG_BRCMFMAC=y
+CONFIG_BRCMFMAC_SDIO=y
+CONFIG_PACKET=y
+
+# IPv6 built in (bcmrpi has it as a module, and post-build.sh drops the modules)
+CONFIG_IPV6=y
+
+# USB host controller used by the dwc2 overlay in config.txt
+CONFIG_USB_DWC2=y
+
+# The printer is driven through libusb (PAPPL), not usblp
+# CONFIG_USB_PRINTER is not set
+
+# Nothing on the boot path needs these on a headless label printer
+# CONFIG_BT is not set
+# CONFIG_LOGO is not set
+# CONFIG_FRAMEBUFFER_CONSOLE is not set
+# CONFIG_DRM is not set
+# CONFIG_SOUND is not set
+# CONFIG_MEDIA_SUPPORT is not set

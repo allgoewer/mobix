@@ -1,0 +1,30 @@
+#!/bin/sh
+#
+# LPrint label printer application (IPP Everywhere, web UI on port 8000).
+# State lives in RAM (/var/lib/lprint.state); S00boot seeds it from
+# /boot/lprint.state if present.
+#
+
+PIDFILE=/run/lprint.pid
+
+case "$1" in
+	start)
+		mkdir -p /var/spool/lprint
+		printf "Starting lprint: "
+		start-stop-daemon -S -q -b -m -p $PIDFILE -x /usr/bin/lprint -- \
+			server \
+			-o log-file=syslog \
+			-o log-level=info \
+			-o spool-directory=/var/spool/lprint \
+			&& echo "OK" || echo "FAIL"
+		;;
+	stop)
+		start-stop-daemon -K -q -p $PIDFILE
+		;;
+	restart)
+		"$0" stop
+		sleep 1
+		"$0" start
+		;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

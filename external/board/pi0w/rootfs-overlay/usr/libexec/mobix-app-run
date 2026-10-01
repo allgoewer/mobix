@@ -1,0 +1,19 @@
+#!/bin/sh
+#
+# Started (and restarted) by BusyBox init, see /etc/inittab.
+# The app finds its configuration via $MOBIX_CONFIG.
+#
+
+APP=/usr/bin/mobix-app
+export MOBIX_CONFIG=/boot/mobix.conf
+
+if [ ! -x "$APP" ]; then
+	# Not part of this build; keep init from respawning in a loop
+	exec sleep 2147483647
+fi
+
+"$APP"
+rc=$?
+logger -t mobix-app "exited with status $rc, restarting"
+# Throttle crash loops
+sleep 1

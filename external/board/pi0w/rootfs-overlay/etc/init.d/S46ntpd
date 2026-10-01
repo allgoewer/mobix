@@ -1,0 +1,20 @@
+#!/bin/sh
+#
+# BusyBox ntpd - the Zero W has no RTC, so the clock starts at the
+# build date until the first NTP answer.
+#
+
+SERVER=pool.ntp.org
+[ -f /etc/ntp-server ] && SERVER=$(cat /etc/ntp-server)
+
+case "$1" in
+	start)
+		printf "Starting ntpd: "
+		start-stop-daemon -S -q -b -m -p /run/ntpd.pid -x /usr/sbin/ntpd -- -n -p "$SERVER" \
+			&& echo "OK" || echo "FAIL"
+		;;
+	stop)
+		start-stop-daemon -K -q -p /run/ntpd.pid
+		;;
+	*) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac

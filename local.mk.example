@@ -1,0 +1,3 @@
+# Copy to local.mk (gitignored) to build packages from local checkouts.
+# After changing the sources: make mobix-app-rebuild all
+MOBIX_APP_OVERRIDE_SRCDIR = $(HOME)/dev/mobix-app

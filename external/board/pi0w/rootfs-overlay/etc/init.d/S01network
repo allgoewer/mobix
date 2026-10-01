@@ -1,0 +1,49 @@
+#!/bin/sh
+#
+# Wi-Fi: wpa_supplicant keeps (re)connecting to the configured networks,
+# dhcpcd follows the link state and re-acquires a lease after reconnects.
+# Both daemonize immediately so the rest of the boot is not blocked.
+#
+
+IFACE=wlan0
+WPA_CONF=/etc/wpa_supplicant.conf
+
+start() {
+	ip link set lo up
+
+	# brcmfmac is built in, wlan0 shows up once its firmware is loaded
+	i=0
+	while [ ! -e /sys/class/net/$IFACE ] && [ "$i" -lt 500 ]; do
+		usleep 10000
+		i=$((i + 1))
+	done
+	if [ ! -e /sys/class/net/$IFACE ]; then
+		echo "S01network: $IFACE not found"
+		return 1
+	fi
+
+	# Power saving adds latency and causes dropouts on brcmfmac
+	iw dev $IFACE set power_save off 2>/dev/null
+
+	printf "Starting wpa_supplicant: "
+	start-stop-daemon -S -q -x /usr/sbin/wpa_supplicant -- \
+		-B -D nl80211 -i $IFACE -c $WPA_CONF -P /run/wpa_supplicant.pid \
+		&& echo "OK" || echo "FAIL"
+
+	printf "Starting dhcpcd: "
+	start-stop-daemon -S -q -x /sbin/dhcpcd -- -b -q $IFACE \
+		&& echo "OK" || echo "FAIL"
+}
+
+stop() {
+	dhcpcd -x $IFACE 2>/dev/null
+	start-stop-daemon -K -q -p /run/wpa_supplicant.pid
+	true
+}
+
+case "$1" in
+	start) start ;;
+	stop) stop ;;
+	restart) stop; start ;;
+	*) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

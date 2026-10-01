@@ -1,0 +1,13 @@
+# Record how long it took from kernel start to the first IPv4 lease.
+# Add ~2 s of GPU firmware time for power-on to network.
+case "$reason" in
+BOUND|REBOOT|STATIC)
+	if [ ! -e /run/boottime ]; then
+		read -r up _ < /proc/uptime
+		echo "$up" > /run/boottime
+		msg="mobix: network up on $interface ($new_ip_address) after ${up}s uptime"
+		echo "$msg" > /dev/console
+		logger -t boottime "$msg"
+	fi
+	;;
+esac

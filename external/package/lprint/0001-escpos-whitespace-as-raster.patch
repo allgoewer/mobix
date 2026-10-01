@@ -1,0 +1,167 @@
+From: Maik Allgöwer <maik@llgoewer.de>
+Date: Tue, 22 Sep 2026 20:04:14 +0200
+Subject: [PATCH 1/2] ESC/POS: emit whitespace as raster lines, not ESC J
+
+Whenever rwriteline hits a blank raster line it ends the current GS v 0
+block and emits ESC J n, so a receipt is sent as one raster graphics
+command per run of whitespace.
+
+Some printers add a small paper feed at the end of every GS v 0 - about
+8 to 10 dots on the generic 80mm printer I tested - and that error is
+picked up once per command.  A receipt ending in a 70 x 70 mm dashed
+square goes out as 52 blocks for a 981 line page, and the square prints
+about 70 mm wide and 113 mm tall.
+
+The line accounting itself is already correct: that page is 552 raster
+lines plus 429 ESC J units, which is exactly the 981 lines it should be.
+The extra paper comes from the 52 commands, not from lost or doubled
+lines.
+
+Send pending blank lines as zero-filled raster lines instead, which
+brings the same page down to 2 blocks.  Whitespace at the top and bottom
+of the receipt is still trimmed: blank lines stay pending until a
+non-blank line follows, and pending lines are discarded at the end of the
+page.  As a side effect vertical spacing no longer depends on the ESC J
+motion unit, which is not guaranteed to be the vertical dot pitch.
+
+This is also what the vendor CUPS filters do - rastertoBixolon trims
+blank scanlines at both ends (removeNullLine) and sends everything in
+between as raster, with no feed command anywhere in the binary.
+
+Upstream: https://github.com/michaelrsweet/lprint/issues/222
+
+---
+diff --git a/lprint-escpos.c b/lprint-escpos.c
+index 1db473e..4046a0a 100644
+--- a/lprint-escpos.c
++++ b/lprint-escpos.c
+@@ -19,7 +19,7 @@ typedef struct lprint_escpos_s		// ESC/POS driver data
+   int		max_width;		// Roll width in hundredths of millimeters
+   lprint_dither_t dither;		// Dithering buffer
+   bool		marked;			// Did we print anything yet?
+-  int		feed;			// Accumulated feed
++  int		feed;			// Number of pending blank lines
+   int		num_lines,		// Number of lines in buffer
+ 		max_lines;		// Maximum number of lines that can fit
+   unsigned char	buffer[32768];		// Graphics buffer
+@@ -50,6 +50,7 @@ static const char * const lprint_escpos_80mm[] =
+ // Local functions...
+ //
+ 
++static bool	lprint_escpos_flush(pappl_job_t *job, lprint_escpos_t *escpos, pappl_device_t *device);
+ static void	lprint_escpos_init(pappl_job_t *job, lprint_escpos_t *escpos);
+ #ifdef PAPPL_API_VERSION_MAJOR
+ static bool	lprint_escpos_printfile(pappl_job_t *job, int doc_number, pappl_pr_options_t *options, pappl_device_t *device);
+@@ -172,6 +173,34 @@ lprintESCPOS(
+ }
+ 
+ 
++//
++// 'lprint_escpos_flush()' - Write the current block of raster graphics.
++//
++
++static bool				// O - `true` on success, `false` on failure
++lprint_escpos_flush(
++    pappl_job_t     *job,		// I - Job
++    lprint_escpos_t *escpos,		// I - ESC/POS driver data
++    pappl_device_t  *device)		// I - Output device
++{
++  bool	ret = true;			// Return value
++
++
++  if (escpos->num_lines <= 0)
++    return (true);
++
++  papplLogJob(job, PAPPL_LOGLEVEL_DEBUG, "Writing %ux%d block.", escpos->dither.out_width, escpos->num_lines);
++
++  ret &= papplDevicePrintf(device, "\035v00%c%c%c%c", escpos->dither.out_width & 255, (escpos->dither.out_width >> 8) & 255, escpos->num_lines & 255, (escpos->num_lines >> 8) & 255) > 0;
++
++  ret &= papplDeviceWrite(device, escpos->buffer, (size_t)escpos->num_lines * escpos->dither.out_width) > 0;
++
++  escpos->num_lines = 0;
++
++  return (ret);
++}
++
++
+ //
+ // 'lprint_escpos_init()' - Initialize ESC/POS driver data based on the driver name...
+ //
+@@ -417,7 +446,14 @@ lprint_escpos_rwriteline(
+   else
+     blank = !escpos->dither.output[0] && !memcmp(escpos->dither.output, escpos->dither.output + 1, escpos->dither.out_width - 1);
+ 
+-  if (!blank)
++  if (blank)
++  {
++    // Blank line, accumulate the whitespace; it is only sent to the printer if
++    // another non-blank line follows, so that whitespace at the "bottom" of the
++    // receipt is trimmed...
++    escpos->feed ++;
++  }
++  else
+   {
+     // Not a blank line, print it...
+     if (!escpos->marked)
+@@ -427,40 +463,35 @@ lprint_escpos_rwriteline(
+       escpos->feed   = 0;
+     }
+ 
+-    memcpy(escpos->buffer + escpos->num_lines * escpos->dither.out_width, escpos->dither.output, escpos->dither.out_width);
+-    escpos->num_lines ++;
+-  }
+-
+-  if ((blank && escpos->num_lines > 0) || escpos->num_lines >= escpos->max_lines || (y == options->header.cupsHeight && escpos->num_lines > 0))
+-  {
+-    // Output current block of graphics...
+-    papplLogJob(job, PAPPL_LOGLEVEL_DEBUG, "Writing %ux%d block with feed %d.", escpos->dither.out_width, escpos->num_lines, escpos->feed);
+-
++    // Send any pending whitespace as blank raster lines.  We deliberately do
++    // *not* use the ESC J feed command here: feeding means ending the current
++    // raster graphics command, and some printers add a small amount of paper
++    // feed at the end of every one, so a receipt picks up that error once per
++    // run of whitespace.  Keeping the whitespace in the raster data also makes
++    // the vertical spacing independent of the ESC J motion unit, which is not
++    // necessarily the vertical dot pitch.  (The vendor CUPS filters do the same
++    // thing - they never feed between raster blocks.)
+     while (escpos->feed > 0)
+     {
+-      if (escpos->feed > 255)
+-      {
+-        ret &= papplDevicePrintf(device, "\033J%c", 255) > 0;
+-        escpos->feed -= 255;
+-      }
+-      else
+-      {
+-        ret &= papplDevicePrintf(device, "\033J%c", escpos->feed) > 0;
+-        escpos->feed = 0;
+-      }
+-    }
++      if (escpos->num_lines >= escpos->max_lines)
++        ret &= lprint_escpos_flush(job, escpos, device);
+ 
+-    ret &= papplDevicePrintf(device, "\035v00%c%c%c%c", escpos->dither.out_width & 255, (escpos->dither.out_width >> 8) & 255, escpos->num_lines & 255, (escpos->num_lines >> 8) & 255) > 0;
++      memset(escpos->buffer + escpos->num_lines * escpos->dither.out_width, 0, escpos->dither.out_width);
++      escpos->num_lines ++;
++      escpos->feed --;
++    }
+ 
+-    ret &= papplDeviceWrite(device, escpos->buffer, escpos->num_lines * escpos->dither.out_width) > 0;
++    if (escpos->num_lines >= escpos->max_lines)
++      ret &= lprint_escpos_flush(job, escpos, device);
+ 
+-    escpos->num_lines = 0;
++    memcpy(escpos->buffer + escpos->num_lines * escpos->dither.out_width, escpos->dither.output, escpos->dither.out_width);
++    escpos->num_lines ++;
+   }
+ 
+-  if (blank)
++  if (escpos->num_lines >= escpos->max_lines || y >= options->header.cupsHeight)
+   {
+-    // Blank line, accumulate the feed...
+-    escpos->feed ++;
++    // Output current block of graphics...
++    ret &= lprint_escpos_flush(job, escpos, device);
+   }
+ 
+   return (ret);

@@ -1,0 +1,34 @@
+# mobix - Raspberry Pi Zero W, RAM-only, tuned for fast boot.
+# https://www.raspberrypi.com/documentation/computers/config_txt.html
+
+# Cut-down GPU firmware: smaller to load, enough for a headless Linux boot
+start_file=start_cd.elf
+fixup_file=fixup_cd.dat
+gpu_mem=16
+
+kernel=zImage
+# Whole rootfs is this initramfs; loaded right after the kernel
+initramfs rootfs.cpio.lz4 followkernel
+
+# Fast boot
+boot_delay=0
+disable_splash=1
+initial_turbo=30
+camera_auto_detect=0
+display_auto_detect=0
+disable_fw_kms_setup=1
+hdmi_ignore_hotplug=1
+hdmi_blanking=2
+
+# Serial console on GPIO14/15 (PL011, Bluetooth disabled)
+enable_uart=1
+dtoverlay=disable-bt
+# Timestamps from the firmware stage on UART, for boot-time measurement.
+# Comment out once tuned.
+uart_2ndstage=1
+
+# USB OTG port in host mode for the printer
+dtoverlay=dwc2,dr_mode=host
+
+# Faster SD access for the kernel (/boot mount)
+dtparam=sd_overclock=50

@@ -1,0 +1,59 @@
+#!/bin/sh
+#
+# Mount the FAT boot partition read-only on /boot and import the
+# configuration it carries into RAM. /boot is never written.
+#
+
+BOOTDEV=/dev/mmcblk0p1
+
+wait_for() {
+	# $1: path, $2: timeout in 10 ms steps
+	i=0
+	while [ ! -e "$1" ] && [ "$i" -lt "$2" ]; do
+		usleep 10000
+		i=$((i + 1))
+	done
+	[ -e "$1" ]
+}
+
+start() {
+	mkdir -p /boot
+	# The SD card is probed asynchronously; userspace is usually faster
+	if ! wait_for "$BOOTDEV" 500; then
+		echo "S00boot: $BOOTDEV not found, running without boot config"
+		return 0
+	fi
+	mountpoint -q /boot || mount /boot || return 0
+
+	if [ -f /boot/wpa_supplicant.conf ]; then
+		install -m 0600 /boot/wpa_supplicant.conf /etc/wpa_supplicant.conf
+	fi
+
+	if [ -f /boot/authorized_keys ]; then
+		install -d -m 0700 /root/.ssh
+		install -m 0600 /boot/authorized_keys /root/.ssh/authorized_keys
+	fi
+
+	# Restore LPrint printer setup (copy /var/lib/lprint.state to the
+	# FAT partition once configured via the web UI)
+	if [ -f /boot/lprint.state ]; then
+		install -m 0600 /boot/lprint.state /var/lib/lprint.state
+	fi
+
+	if [ -f /boot/mobix.conf ]; then
+		. /boot/mobix.conf
+		if [ -n "$HOSTNAME" ]; then
+			echo "$HOSTNAME" > /etc/hostname
+			hostname "$HOSTNAME"
+		fi
+		if [ -n "$NTP_SERVER" ]; then
+			echo "$NTP_SERVER" > /etc/ntp-server
+		fi
+	fi
+}
+
+case "$1" in
+	start) start ;;
+	stop) umount /boot 2>/dev/null; true ;;
+	*) echo "Usage: $0 {start|stop}"; exit 1 ;;
+esac

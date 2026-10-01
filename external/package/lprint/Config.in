@@ -1,0 +1,8 @@
+config BR2_PACKAGE_LPRINT
+	bool "lprint"
+	depends on BR2_PACKAGE_PAPPL
+	help
+	  LPrint implements printing for a variety of common label and
+	  receipt printers connected via network or USB.
+
+	  https://www.msweet.org/lprint

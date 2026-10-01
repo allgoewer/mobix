@@ -1,0 +1,31 @@
+#!/bin/sh
+#
+# Persist the LPrint printer setup: copy /var/lib/lprint.state to the
+# FAT boot partition, from where S00boot restores it on every boot.
+# /boot is only writable while this script runs.
+#
+
+STATE=/var/lib/lprint.state
+DEST=/boot/lprint.state
+
+if [ ! -f "$STATE" ]; then
+	echo "$0: $STATE not found, configure the printer first" >&2
+	exit 1
+fi
+if ! mountpoint -q /boot; then
+	echo "$0: /boot is not mounted" >&2
+	exit 1
+fi
+
+mount -o remount,rw /boot || exit 1
+trap 'mount -o remount,ro /boot' EXIT
+
+# Write to a temporary name first so a power loss never leaves a
+# truncated state file behind
+cp "$STATE" "$DEST.new" && sync && mv "$DEST.new" "$DEST" || {
+	rm -f "$DEST.new"
+	echo "$0: copying $STATE failed" >&2
+	exit 1
+}
+sync
+echo "Saved $STATE to $DEST"

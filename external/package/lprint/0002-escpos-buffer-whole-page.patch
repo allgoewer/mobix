@@ -1,0 +1,130 @@
+From: Maik Allgöwer <maik@llgoewer.de>
+Date: Tue, 22 Sep 2026 20:04:14 +0200
+Subject: [PATCH 2/2] ESC/POS: buffer the whole page in one raster command
+
+With whitespace kept in the raster data, what is left is one GS v 0 per
+32KB of graphics buffer - every 32768/bytes-per-line lines, or every 512
+lines on an 80mm printer.  Each one still costs the small feed described
+in the previous patch, which shows up as a break in any long vertical
+rule.
+
+Measured with a 512 x 2400 test pattern that has solid rules down both
+edges: the rules break every 512 lines, and forcing the buffer to 400
+lines moves the breaks to 400/800/1200/1600/2000, so it is one break per
+command rather than anything in the image.
+
+Size the graphics buffer to the page instead, clamped to 32KB..4MB, so a
+receipt is sent as a single command and the feed lands after the last
+line where it does no harm.  Pages larger than the cap still split as
+before.
+
+GS v 0 takes the height as a two byte value, so the line count needs a
+cap of its own: at 58mm the roll is 384 dots wide, and 4MB of buffer
+would be 87381 lines, which wraps the height field and leaves the
+printer reading image data as commands.  Clamp to 65535 lines both when
+sizing the buffer and when deriving max_lines, since the 32KB minimum is
+not derived from the page height at all.
+
+Upstream: https://github.com/michaelrsweet/lprint/issues/222
+
+---
+diff --git a/lprint-escpos.c b/lprint-escpos.c
+index 4046a0a..51911d6 100644
+--- a/lprint-escpos.c
++++ b/lprint-escpos.c
+@@ -22,11 +22,23 @@
+   int		feed;			// Number of pending blank lines
+   int		num_lines,		// Number of lines in buffer
+ 		max_lines;		// Maximum number of lines that can fit
+-  unsigned char	buffer[32768];		// Graphics buffer
++  unsigned char	*buffer;		// Graphics buffer
+ } lprint_escpos_t;
+ 
+ 
+ //
++// Constants...
++//
++
++#define LPRINT_ESCPOS_MIN_BUFFER	32768
++					// Minimum graphics buffer size
++#define LPRINT_ESCPOS_MAX_BUFFER	(4 * 1024 * 1024)
++					// Maximum graphics buffer size
++#define LPRINT_ESCPOS_MAX_LINES		65535
++					// Maximum number of lines per raster command
++
++
++//
+ // Local globals...
+ //
+ 
+@@ -306,6 +318,7 @@
+ 
+   (void)options;
+ 
++  free(escpos->buffer);
+   free(escpos);
+   papplJobSetData(job, NULL);
+ 
+@@ -347,6 +360,9 @@
+   // Free memory and return...
+   lprintDitherFree(&escpos->dither);
+ 
++  free(escpos->buffer);
++  escpos->buffer = NULL;
++
+   // Update status...
+   lprint_escpos_update_reasons(papplJobGetPrinter(job), job, device);
+ 
+@@ -403,6 +419,8 @@
+ {
+   lprint_escpos_t	*escpos = (lprint_escpos_t *)papplJobGetData(job);
+ 					// ESC/POS driver data
++  size_t		size;		// Size of graphics buffer
++  unsigned		lines;		// Number of lines in graphics buffer
+ 
+ 
+   (void)page;
+@@ -414,11 +432,42 @@
+   if (!lprintDitherAlloc(&escpos->dither, job, options, /*head_width*/0, CUPS_CSPACE_K, 1.0, /*out_mirror*/false))
+     return (false);
+ 
++  // Allocate the graphics buffer.  We buffer the whole page when we can so that
++  // it is sent as a single raster graphics command - some printers add a small
++  // amount of feed at the end of every command, which shows up as a seam.  The
++  // height is sent as a two byte value, so never buffer more lines than fit in
++  // a single command...
++  if ((lines = options->header.cupsHeight) > LPRINT_ESCPOS_MAX_LINES)
++    lines = LPRINT_ESCPOS_MAX_LINES;
++
++  size = (size_t)escpos->dither.out_width * lines;
++
++  if (size < LPRINT_ESCPOS_MIN_BUFFER)
++    size = LPRINT_ESCPOS_MIN_BUFFER;
++  else if (size > LPRINT_ESCPOS_MAX_BUFFER)
++    size = LPRINT_ESCPOS_MAX_BUFFER;
++
++  free(escpos->buffer);
++
++  if ((escpos->buffer = (unsigned char *)malloc(size)) == NULL)
++  {
++    papplLogJob(job, PAPPL_LOGLEVEL_ERROR, "Unable to allocate %u byte graphics buffer.", (unsigned)size);
++    return (false);
++  }
++
+   escpos->marked    = false;
+   escpos->feed      = 0;
+-  escpos->max_lines = (int)(sizeof(escpos->buffer) / escpos->dither.out_width);
++  escpos->max_lines = (int)(size / escpos->dither.out_width);
+   escpos->num_lines = 0;
+ 
++  // A narrow roll can fit more lines in the buffer than the command can
++  // express, and the minimum buffer size is not derived from the height at
++  // all, so clamp the line count as well...
++  if (escpos->max_lines > LPRINT_ESCPOS_MAX_LINES)
++    escpos->max_lines = LPRINT_ESCPOS_MAX_LINES;
++
++  papplLogJob(job, PAPPL_LOGLEVEL_DEBUG, "Graphics buffer is %u bytes (%d lines).", (unsigned)size, escpos->max_lines);
++
+   return (true);
+ }
+ 
