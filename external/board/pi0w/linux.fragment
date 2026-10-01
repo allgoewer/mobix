@@ -28,6 +28,10 @@ CONFIG_USB_DWC2=y
 # The printer is driven through libusb (PAPPL), not usblp
 # CONFIG_USB_PRINTER is not set
 
+# Blink sequences on the ACT LED (a module in bcmrpi, and post-build.sh
+# drops the modules)
+CONFIG_LEDS_TRIGGER_PATTERN=y
+
 # Nothing on the boot path needs these on a headless label printer
 # CONFIG_BT is not set
 # CONFIG_LOGO is not set

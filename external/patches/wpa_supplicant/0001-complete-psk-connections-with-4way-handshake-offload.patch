@@ -1,0 +1,33 @@
+Subject: [PATCH] Complete PSK connections on association with 4-way handshake offload
+
+Since wpa_supplicant 2.11 (commit 41638606054a, "Mark authorization
+completed on driver indication during 4-way HS offload"), a connection
+using 4-way handshake offload is only completed once the driver sends
+a port authorized event. brcmfmac in the Raspberry Pi 6.12 kernel does
+the WPA2-PSK handshake in firmware but never sends that event for PSK,
+so on the Pi Zero W (BCM43430) wpa_supplicant stays in ASSOCIATED, the
+interface never gets carrier, the authentication timeout hits and the
+connection is torn down again, forever.
+
+Buildroot carried a revert of that commit for 2.11
+(0001-Revert-Mark-authorization-completed-on-driver-indica.patch) and
+dropped it with the bump to 2.12 as "upstream", but 2.12 still has the
+code. Restore the pre-2.11 behaviour for the PSK offload case only; the
+OWE offload case added in 2.12 is left as it is.
+
+Upstream: not applicable, see http://lists.infradead.org/pipermail/hostap/2024-August/042893.html
+
+---
+--- a/wpa_supplicant/events.c
++++ b/wpa_supplicant/events.c
+@@ -4925,7 +4925,9 @@
+ 		    wpa_key_mgmt_wpa_psk(wpa_s->key_mgmt)) ||
+ 		   ((wpa_s->drv_flags2 & WPA_DRIVER_FLAGS2_OWE_OFFLOAD_STA) &&
+ 		    wpa_s->key_mgmt == WPA_KEY_MGMT_OWE)) {
+-		if (already_authorized) {
++		if (already_authorized ||
++		    ((wpa_s->drv_flags & WPA_DRIVER_FLAGS_4WAY_HANDSHAKE_PSK) &&
++		     wpa_key_mgmt_wpa_psk(wpa_s->key_mgmt))) {
+ 			/*
+ 			 * We are done; the driver will take care of RSN 4-way
+ 			 * handshake.

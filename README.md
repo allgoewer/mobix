@@ -8,9 +8,10 @@ Buildroot image for a Raspberry Pi Zero W that runs entirely from RAM:
 - Wi-Fi via wpa_supplicant + dhcpcd, auto-connect and reconnect; dual stack (IPv4 DHCP,
   IPv6 SLAAC/DHCPv6 with stable addresses derived from the MAC)
 - a Rust app (`mobix-app`) is cross-built by Buildroot's cargo infrastructure and supervised by init
+- [Typst](https://typst.app) command line compiler (`typst`) for rendering labels
 - tuned for **< 10 s from power-on to network**
 
-Buildroot 2026.02.3 (LTS) is a git submodule; everything project specific lives in the
+Buildroot 2026.08 is a git submodule (Typst needs its newer Rust); everything project specific lives in the
 `external/` BR2_EXTERNAL tree.
 
 ## Build
@@ -113,12 +114,14 @@ Further knobs: `lpj=` on `cmdline.txt` (value from `dmesg | grep lpj`) skips del
 ## Layout
 
 ```
-buildroot/                   Buildroot submodule (2026.02.3)
+buildroot/                   Buildroot submodule (2026.08)
 external/                    BR2_EXTERNAL "MOBIX"
   configs/mobix_pi0w_defconfig
   board/pi0w/                config.txt, cmdline.txt, genimage.cfg, kernel/busybox fragments,
                              post-build/post-image scripts, rootfs-overlay/, boot-files/
   package/pappl, lprint      PAPPL 1.4.12, LPrint git 54f1c46 + ESC/POS patches (issue #222)
   package/mobix-app          the Rust app (cargo-package, git)
+  package/typst              Typst 0.15.1 (cargo-package, needs Rust >= 1.92)
+  patches/wpa_supplicant     fix for WPA2-PSK on brcmfmac (handshake done in firmware)
 Makefile                     wrapper (O=output, BR2_EXTERNAL=external, dl/ cache)
 ```

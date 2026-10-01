@@ -1,3 +1,4 @@
 source "$BR2_EXTERNAL_MOBIX_PATH/package/pappl/Config.in"
 source "$BR2_EXTERNAL_MOBIX_PATH/package/lprint/Config.in"
 source "$BR2_EXTERNAL_MOBIX_PATH/package/mobix-app/Config.in"
+source "$BR2_EXTERNAL_MOBIX_PATH/package/typst/Config.in"
