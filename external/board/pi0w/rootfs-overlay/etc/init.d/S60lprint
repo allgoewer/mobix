@@ -10,7 +10,13 @@ PIDFILE=/run/lprint.pid
 case "$1" in
 	start)
 		mkdir -p /var/spool/lprint
+		# libcups keeps the (self-signed, per-boot) TLS certificate here
+		# and does not create the directory itself
+		mkdir -p -m 0700 /etc/cups/ssl
 		printf "Starting lprint: "
+		# With HOME set, LPrint would use $HOME/.config/lprint.state;
+		# XDG_DATA_HOME takes precedence and puts it in /var/lib
+		XDG_DATA_HOME=/var/lib \
 		start-stop-daemon -S -q -b -m -p $PIDFILE -x /usr/bin/lprint -- \
 			server \
 			-o log-file=syslog \
