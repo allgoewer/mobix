@@ -2,7 +2,8 @@
 #
 # mobix - maintenance commands for the device
 #
-#   mobix save              keep the LPrint printer setup across reboots
+#   mobix save              keep the LPrint printer setup and the SSH host
+#                           keys across reboots
 #   mobix update [--check]  install the latest signed release
 #   mobix version           show the running version and boot slot
 #
@@ -15,6 +16,7 @@ BOOT=${MOBIX_BOOT:-/boot}
 RELEASE=${MOBIX_RELEASE:-/etc/mobix-release}
 PUBKEY=${MOBIX_PUBKEY:-/etc/mobix/update.pub}
 STATE=${MOBIX_STATE:-/var/lib/lprint.state}
+KEYDIR=${MOBIX_KEYDIR:-/etc/dropbear}
 CMDLINE=${MOBIX_CMDLINE:-/proc/cmdline}
 WORK=${MOBIX_WORK:-/tmp/mobix-update}
 
@@ -56,18 +58,40 @@ field() {
 	echo "$2" | tr ' ' '\n' | sed -n "s/^$1=//p"
 }
 
-cmd_save() {
-	[ -f "$STATE" ] || die "$STATE not found, configure the printer first"
-	boot_rw
-	# Write to a temporary name first so a power loss never leaves a
-	# truncated state file behind
-	cp "$STATE" "$BOOT/lprint.state.new" && sync &&
-		mv "$BOOT/lprint.state.new" "$BOOT/lprint.state" || {
-		rm -f "$BOOT/lprint.state.new"
-		die "copying $STATE failed"
+# Copy $1 to $2 on the boot partition. Write to a temporary name first
+# so a power loss never leaves a truncated file behind.
+put() {
+	cp "$1" "$2.new" && sync && mv "$2.new" "$2" || {
+		rm -f "$2.new"
+		die "copying $1 failed"
 	}
+}
+
+cmd_save() {
+	# dropbear only creates a host key when a client first asks for that
+	# type. Create the common ones now, so every client keeps seeing the
+	# same key after a reboot.
+	mkdir -p "$KEYDIR" 2>/dev/null
+	for t in ed25519 ecdsa; do
+		[ -f "$KEYDIR/dropbear_${t}_host_key" ] ||
+			dropbearkey -t "$t" -f "$KEYDIR/dropbear_${t}_host_key" > /dev/null 2>&1 ||
+			die "cannot create the $t SSH host key"
+	done
+
+	boot_rw
+	mkdir -p "$BOOT/dropbear" || die "cannot create $BOOT/dropbear"
+	for k in "$KEYDIR"/dropbear_*_host_key; do
+		put "$k" "$BOOT/dropbear/$(basename "$k")"
+	done
+	echo "Saved SSH host keys to $BOOT/dropbear"
+
+	if [ -f "$STATE" ]; then
+		put "$STATE" "$BOOT/lprint.state"
+		echo "Saved $STATE to $BOOT/lprint.state"
+	else
+		echo "No printer setup yet ($STATE), nothing to save for LPrint"
+	fi
 	sync
-	echo "Saved $STATE to $BOOT/lprint.state"
 }
 
 cmd_version() {

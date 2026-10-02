@@ -34,8 +34,19 @@ start() {
 		install -m 0600 /boot/authorized_keys /root/.ssh/authorized_keys
 	fi
 
-	# Restore LPrint printer setup (copy /var/lib/lprint.state to the
-	# FAT partition once configured via the web UI)
+	# SSH host keys saved by "mobix save", so the device keeps its identity
+	# across reboots. /etc/dropbear is a symlink to /var/run/dropbear in
+	# the image; with a real directory in place S50dropbear leaves it alone.
+	if [ -d /boot/dropbear ]; then
+		rm -f /etc/dropbear
+		install -d -m 0700 /etc/dropbear
+		for k in /boot/dropbear/dropbear_*_host_key; do
+			[ -f "$k" ] && install -m 0600 "$k" /etc/dropbear/
+		done
+	fi
+
+	# Restore LPrint printer setup ("mobix save" copies
+	# /var/lib/lprint.state to the FAT partition)
 	if [ -f /boot/lprint.state ]; then
 		install -m 0600 /boot/lprint.state /var/lib/lprint.state
 	fi

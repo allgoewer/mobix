@@ -123,11 +123,15 @@ Then edit these files on the FAT partition:
 | `wpa_supplicant.conf` | Wi-Fi networks and `country=` (copied to `/etc` at boot) |
 | `mobix.conf` | hostname, NTP server; also read by the app |
 | `authorized_keys` | optional, root SSH keys for dropbear |
-| `lprint.state` | optional, LPrint printer setup (see below) |
+| `lprint.state` | optional, LPrint printer setup (written by `mobix save`) |
+| `dropbear/` | optional, SSH host keys (written by `mobix save`) |
 
-LPrint's state lives in RAM. Configure the printer once in the web UI (`http://<ip>:8000`), then
-run `mobix save` on the device (e.g. `ssh root@mobix mobix save`). It copies
-`/var/lib/lprint.state` to the FAT partition, and it will be restored on every boot.
+LPrint's state and the SSH host keys live in RAM. Configure the printer once in the web UI
+(`http://<ip>:8000`), then run `mobix save` on the device (e.g. `ssh root@mobix mobix save`). It
+copies `/var/lib/lprint.state` and the host keys to the FAT partition, from where they are
+restored on every boot. Without saved host keys the device generates new ones at each boot and
+SSH clients warn about a changed host key. Like the other files on the card, the keys are stored
+unencrypted.
 
 Serial console: GPIO14/15, 115200 8N1, login `root` (no password — set one or remove the getty
 in `external/board/pi0w/rootfs-overlay/etc/inittab` for production).
