@@ -51,7 +51,7 @@ For each release, from a clean, tagged commit:
 git tag v1.0.0
 make release           # MINISIGN_KEY=<file> if the key is elsewhere
 git push origin v1.0.0
-gh release create v1.0. --verify-tag --generate-notes output/release/*
+gh release create v1.0.0 --verify-tag --generate-notes output/release/*
 ```
 
 `make release` builds, signs and collects in `output/release/`:
