@@ -48,10 +48,10 @@ If the secret key is lost, deployed devices cannot be updated any more and need 
 For each release, from a clean, tagged commit:
 
 ```sh
-git tag v1.0
+git tag v1.0.0
 make release           # MINISIGN_KEY=<file> if the key is elsewhere
-git push origin v1.0
-gh release create v1.0 --verify-tag --generate-notes output/release/*
+git push origin v1.0.0
+gh release create v1.0. --verify-tag --generate-notes output/release/*
 ```
 
 `make release` builds, signs and collects in `output/release/`:
