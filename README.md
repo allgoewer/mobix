@@ -113,7 +113,7 @@ For development against a local checkout: `cp local.mk.example local.mk`, adjust
 ## Flash and configure
 
 ```sh
-sudo dd if=output/images/sdcard.img of=/dev/sdX bs=4M conv=fsync
+sudo dd if=output/images/sdcard.img of=/dev/sdX bs=4M conv=fsync status=progress
 ```
 
 Then edit these files on the FAT partition:
