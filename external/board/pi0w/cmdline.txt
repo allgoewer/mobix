@@ -1,1 +1,1 @@
-console=serial0,115200 rdinit=/init quiet loglevel=3 fsck.mode=skip
+console=serial0,115200 rdinit=/init quiet loglevel=3 fsck.mode=skip mobix.slot=@SLOT@

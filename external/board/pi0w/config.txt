@@ -6,9 +6,17 @@ start_file=start_cd.elf
 fixup_file=fixup_cd.dat
 gpu_mem=16
 
-kernel=zImage
+# Kernel, initramfs, device tree, overlays and kernel command line exist
+# in two slots (a/b). "mobix update" installs into the slot that is not
+# running and switches by rewriting this file. @SLOT@ is filled in by
+# post-image.sh (a) and by "mobix update"; to go back to the previous
+# version, change the slot letter in the five lines below.
+kernel=zImage-@SLOT@
 # Whole rootfs is this initramfs; loaded right after the kernel
-initramfs rootfs.cpio.lz4 followkernel
+initramfs rootfs-@SLOT@.cpio.lz4 followkernel
+device_tree=mobix-@SLOT@.dtb
+overlay_prefix=overlays-@SLOT@/
+cmdline=cmdline-@SLOT@.txt
 
 # Fast boot
 boot_delay=0

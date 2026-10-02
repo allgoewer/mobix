@@ -52,3 +52,16 @@ done
 # Man pages, headers and static libs never belong on the target
 rm -rf "${TARGET_DIR}/usr/share/man" "${TARGET_DIR}/usr/include"
 find "${TARGET_DIR}/usr/lib" -name '*.a' -delete
+
+# Version stamp: "mobix update" only installs releases with a newer
+# timestamp, "make release" signs exactly these two values
+BOARD_DIR="$(dirname "$0")"
+cat > "${TARGET_DIR}/etc/mobix-release" <<EOF
+VERSION=$(git -C "${BOARD_DIR}" describe --tags --always --dirty 2>/dev/null || echo unknown)
+TIMESTAMP=$(date +%s)
+EOF
+
+if [ ! -f "${TARGET_DIR}/etc/mobix/update.pub" ]; then
+	echo "WARNING: no etc/mobix/update.pub in the rootfs overlay," \
+		"this image cannot verify updates (see README, Releases)"
+fi

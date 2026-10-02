@@ -1,0 +1,185 @@
+#!/bin/sh
+#
+# mobix - maintenance commands for the device
+#
+#   mobix save              keep the LPrint printer setup across reboots
+#   mobix update [--check]  install the latest signed release
+#   mobix version           show the running version and boot slot
+#
+# The FAT boot partition is mounted read-only; it is only writable while
+# one of these commands runs.
+#
+
+# Overridable from the environment for testing
+BOOT=${MOBIX_BOOT:-/boot}
+RELEASE=${MOBIX_RELEASE:-/etc/mobix-release}
+PUBKEY=${MOBIX_PUBKEY:-/etc/mobix/update.pub}
+STATE=${MOBIX_STATE:-/var/lib/lprint.state}
+CMDLINE=${MOBIX_CMDLINE:-/proc/cmdline}
+WORK=${MOBIX_WORK:-/tmp/mobix-update}
+
+# Release assets with fixed names; mobix.conf can set UPDATE_URL
+UPDATE_URL=https://github.com/allgoewer/mobix/releases/latest/download
+
+BOOT_RW=
+
+die() {
+	echo "mobix: $*" >&2
+	exit 1
+}
+
+cleanup() {
+	[ -n "$BOOT_RW" ] && mount -o remount,ro "$BOOT"
+	rm -rf "$WORK"
+}
+trap cleanup EXIT
+trap 'exit 1' INT TERM
+
+boot_rw() {
+	mountpoint -q "$BOOT" || die "$BOOT is not mounted"
+	mount -o remount,rw "$BOOT" || die "cannot remount $BOOT read-write"
+	BOOT_RW=1
+}
+
+# Slot the running system was booted from (set on the kernel command line)
+running_slot() {
+	sed -n 's/.*mobix\.slot=\([ab]\).*/\1/p' "$CMDLINE"
+}
+
+# Slot the firmware will boot next
+next_slot() {
+	sed -n 's/^kernel=zImage-\([ab]\)$/\1/p' "$BOOT/config.txt"
+}
+
+# $1: key, $2: "key=value key=value ..." -> value
+field() {
+	echo "$2" | tr ' ' '\n' | sed -n "s/^$1=//p"
+}
+
+cmd_save() {
+	[ -f "$STATE" ] || die "$STATE not found, configure the printer first"
+	boot_rw
+	# Write to a temporary name first so a power loss never leaves a
+	# truncated state file behind
+	cp "$STATE" "$BOOT/lprint.state.new" && sync &&
+		mv "$BOOT/lprint.state.new" "$BOOT/lprint.state" || {
+		rm -f "$BOOT/lprint.state.new"
+		die "copying $STATE failed"
+	}
+	sync
+	echo "Saved $STATE to $BOOT/lprint.state"
+}
+
+cmd_version() {
+	[ -r "$RELEASE" ] || die "$RELEASE missing"
+	. "$RELEASE"
+	echo "mobix $VERSION, built $(date -u -d "@$TIMESTAMP" '+%Y-%m-%d %H:%M UTC')"
+	echo "running from slot $(running_slot), next boot uses slot $(next_slot)"
+}
+
+cmd_update() {
+	check_only=
+	[ "${1:-}" = --check ] && check_only=1
+
+	[ -r "$RELEASE" ] || die "$RELEASE missing"
+	. "$RELEASE"
+	[ -f "$PUBKEY" ] || die "this image has no update key ($PUBKEY)"
+	[ -f "$BOOT/mobix.conf" ] && . "$BOOT/mobix.conf"
+
+	slot=$(running_slot)
+	case "$slot" in
+		a) new=b ;;
+		b) new=a ;;
+		*) die "cannot tell the running slot (image predates updates?)" ;;
+	esac
+	if [ "$(next_slot)" != "$slot" ]; then
+		echo "An update is already installed in slot $new; power-cycle to activate it."
+		return 0
+	fi
+
+	# TLS certificate checks need a sane clock, and there is no RTC
+	[ "$(date +%Y)" -ge 2026 ] ||
+		die "clock is not set yet (waiting for NTP), try again shortly"
+
+	rm -rf "$WORK"
+	mkdir -p "$WORK/files" || die "cannot create $WORK"
+	sig=$WORK/mobix-update.tar.minisig
+	tar=$WORK/mobix-update.tar
+
+	curl -fsSL -o "$sig" "$UPDATE_URL/mobix-update.tar.minisig" ||
+		die "cannot fetch release information from $UPDATE_URL"
+
+	# Not verified yet: only used to decide whether to download at all
+	comment=$(sed -n 's/^trusted comment: //p' "$sig")
+	new_version=$(field version "$comment")
+	new_ts=$(field timestamp "$comment")
+	case "$new_ts" in
+		'' | *[!0-9]*) die "release carries no valid timestamp" ;;
+	esac
+	if [ "$new_ts" -le "$TIMESTAMP" ]; then
+		echo "Up to date: running $VERSION, latest release is $new_version"
+		return 0
+	fi
+	echo "Update available: $new_version (running $VERSION)"
+	[ -n "$check_only" ] && return 0
+
+	echo "Downloading $new_version..."
+	curl -fL -# -o "$tar" "$UPDATE_URL/mobix-update.tar" || die "download failed"
+
+	# -Q prints only the trusted comment, which the signature covers
+	comment=$(minisign -V -Q -p "$PUBKEY" -x "$sig" -m "$tar") ||
+		die "signature verification FAILED, not installing"
+	new_version=$(field version "$comment")
+	new_ts=$(field timestamp "$comment")
+	case "$new_ts" in
+		'' | *[!0-9]*) die "signed release carries no valid timestamp" ;;
+	esac
+	# Never go back to an older, validly signed release
+	[ "$new_ts" -gt "$TIMESTAMP" ] || die "signed release is not newer than $VERSION"
+
+	tar -xf "$tar" -C "$WORK/files" || die "cannot unpack the update"
+	rm -f "$tar"
+	src=$WORK/files
+	for f in zImage rootfs.cpio.lz4 mobix.dtb cmdline.txt config.txt overlays/README; do
+		[ -e "$src/$f" ] || die "update is incomplete: $f missing"
+	done
+
+	echo "Installing into slot $new..."
+	boot_rw
+	rm -rf "$BOOT/zImage-$new" "$BOOT/rootfs-$new.cpio.lz4" "$BOOT/mobix-$new.dtb" \
+		"$BOOT/cmdline-$new.txt" "$BOOT/overlays-$new" "$BOOT/config.new"
+	# Same names as post-image.sh uses for slot a of a fresh image
+	cp "$src/zImage" "$BOOT/zImage-$new" &&
+		cp "$src/rootfs.cpio.lz4" "$BOOT/rootfs-$new.cpio.lz4" &&
+		cp "$src/mobix.dtb" "$BOOT/mobix-$new.dtb" &&
+		sed "s/@SLOT@/$new/g" "$src/cmdline.txt" > "$BOOT/cmdline-$new.txt" &&
+		cp -r "$src/overlays" "$BOOT/overlays-$new" ||
+		die "writing slot $new failed; slot $slot stays active"
+
+	# Read back from the card, not from the page cache
+	sync
+	echo 3 > /proc/sys/vm/drop_caches 2>/dev/null
+	cmp -s "$src/zImage" "$BOOT/zImage-$new" &&
+		cmp -s "$src/rootfs.cpio.lz4" "$BOOT/rootfs-$new.cpio.lz4" &&
+		cmp -s "$src/mobix.dtb" "$BOOT/mobix-$new.dtb" ||
+		die "read-back of slot $new failed; slot $slot stays active"
+
+	# The switch: until this rename the old slot boots
+	sed "s/@SLOT@/$new/g" "$src/config.txt" > "$BOOT/config.new" && sync &&
+		mv "$BOOT/config.new" "$BOOT/config.txt" ||
+		die "switching to slot $new failed; slot $slot stays active"
+	sync
+
+	echo "Installed $new_version in slot $new; it runs after the next power cycle."
+	echo "To go back, change the slot letters in config.txt on the card to '$slot'."
+}
+
+case "${1:-}" in
+	save) cmd_save ;;
+	update) shift; cmd_update "$@" ;;
+	version) cmd_version ;;
+	*)
+		echo "Usage: mobix save | update [--check] | version" >&2
+		exit 1
+		;;
+esac
