@@ -8,7 +8,8 @@ Buildroot image for a Raspberry Pi Zero W that runs entirely from RAM:
 - [LPrint](https://www.msweet.org/lprint) (on PAPPL) drives USB label printers; web UI on port 8000
 - Wi-Fi via wpa_supplicant + dhcpcd, auto-connect and reconnect; dual stack (IPv4 DHCP,
   IPv6 SLAAC/DHCPv6 with stable addresses derived from the MAC)
-- a Rust app (`mobix-app`) is cross-built by Buildroot's cargo infrastructure and supervised by init
+- a Rust app (`mobix-app`, in `app/`) prints MQTT messages (text and/or images) on the receipt
+  printer; cross-built by Buildroot's cargo infrastructure and supervised by init
 - [Typst](https://typst.app) command line compiler (`typst`) for rendering labels
 - tuned for **< 10 s from power-on to network**
 
@@ -96,19 +97,51 @@ to use another location.
 
 ## Rust app
 
-The app comes from its own git repository (the repo must contain `Cargo.lock`, the build uses `--locked`):
+The app in `app/` receives print jobs over MQTT, renders them with Typst on 80 mm paper (4 mm
+margins) and prints them through LPrint. It is installed as `/usr/bin/mobix-app` and started by
+`/etc/inittab` (respawned if it exits); its config file path is passed in `$MOBIX_CONFIG`
+(`/boot/mobix.conf`). It logs to syslog (`logread`); `MOBIX_DEBUG=1` in its environment adds debug
+output.
+
+Set `MQTT_HOST` (and optionally port, credentials, TLS, topic prefix) in `mobix.conf`. With the
+default prefix `mobix/<HOSTNAME>`:
+
+| Topic | |
+|---|---|
+| `mobix/<HOSTNAME>/print` | print jobs, subscribed with QoS 1 |
+| `mobix/<HOSTNAME>/status` | retained `online`, or `offline` (also the last will) |
+
+A job is a JSON object with `text`, `image` (base64 PNG, JPEG, GIF, WebP or SVG) or both; the image
+is scaled to the paper width and printed above the text. Text is printed as is, unless
+`"markup": true` makes it Typst markup. Payloads are limited to 8 MB.
 
 ```sh
-make menuconfig   # External options -> mobix-app: git URL, revision, binary name
-make savedefconfig && make
+mosquitto_pub -h broker -q 1 -t mobix/mobix/print -m '{"text": "Hello\nWorld"}'
+mosquitto_pub -h broker -q 1 -t mobix/mobix/print -m '{"text": "= Order 42\n*2x* Coffee", "markup": true}'
+mosquitto_pub -h broker -q 1 -t mobix/mobix/print -s <<EOF
+{"text": "Logo", "image": "$(base64 -w0 logo.png)"}
+EOF
 ```
 
-Use a commit hash or tag as revision; a branch name is only fetched once and then cached in `dl/`.
-The binary is installed as `/usr/bin/mobix-app` and started by `/etc/inittab` (respawned if it exits).
-Its config file path is passed in `$MOBIX_CONFIG` (`/boot/mobix.conf`).
+Delivery: the app keeps a persistent session (client id `mobix-<HOSTNAME>`), so jobs published
+with QoS 1 or 2 while the device is off are printed when it comes back. A job is acknowledged
+only once LPrint has accepted it (if LPrint is unreachable, the app retries and holds back later
+jobs); invalid jobs are logged and dropped. A job can print twice only if the app dies between
+handing it to LPrint and acknowledging it.
 
-For development against a local checkout: `cp local.mk.example local.mk`, adjust the path, then
-`make mobix-app-rebuild all`.
+Rendering uses the printer's resolution (`PRINT_PPI` overrides it), so the PNG is printed pixel for
+pixel on a roll cut to the receipt's length. The Typst template is `app/src/receipt.typ`.
+
+Development on the host (needs `typst`; point `PRINTER_URI` at a test printer such as
+`ippeveprinter`):
+
+```sh
+cd app && cargo test -- --include-ignored
+MOBIX_CONFIG=test.conf cargo run
+```
+
+After changes, `make mobix-app-rebuild all` rebuilds the app and the image. The build uses
+`--locked`, so commit `app/Cargo.lock` together with dependency changes.
 
 ## Flash and configure
 
@@ -121,7 +154,7 @@ Then edit these files on the FAT partition:
 | File | Purpose |
 |---|---|
 | `wpa_supplicant.conf` | Wi-Fi networks and `country=` (copied to `/etc` at boot) |
-| `mobix.conf` | hostname, NTP server; also read by the app |
+| `mobix.conf` | hostname, NTP server, MQTT broker for the app |
 | `authorized_keys` | optional, root SSH keys for dropbear |
 | `lprint.state` | optional, LPrint printer setup (written by `mobix save`) |
 | `dropbear/` | optional, SSH host keys (written by `mobix save`) |
@@ -168,6 +201,7 @@ Further knobs: `lpj=` on `cmdline.txt` (value from `dmesg | grep lpj`) skips del
 ## Layout
 
 ```
+app/                         the Rust app (MQTT -> Typst -> LPrint)
 buildroot/                   Buildroot submodule (2026.08)
 external/                    BR2_EXTERNAL "MOBIX"
   configs/mobix_pi0w_defconfig
@@ -175,7 +209,7 @@ external/                    BR2_EXTERNAL "MOBIX"
                              post-build/post-image scripts, release.sh, rootfs-overlay/
                              (incl. the `mobix` command), boot-files/
   package/pappl, lprint      PAPPL 1.4.12, LPrint git 54f1c46 + ESC/POS patches (issue #222)
-  package/mobix-app          the Rust app (cargo-package, git)
+  package/mobix-app          the Rust app (cargo-package, local source from app/)
   package/typst              Typst 0.15.1 (cargo-package, needs Rust >= 1.92)
   patches/wpa_supplicant     fix for WPA2-PSK on brcmfmac (handshake done in firmware)
 Makefile                     wrapper (O=output, BR2_EXTERNAL=external, dl/ cache)

@@ -1,0 +1,24 @@
+[package]
+name = "mobix-app"
+version = "0.1.0"
+edition = "2024"
+description = "Prints MQTT messages (text and/or images) on a receipt printer via Typst and LPrint"
+license = "Proprietary"
+publish = false
+
+[dependencies]
+anyhow = "1.0.104"
+base64 = "0.23.1"
+ipp = { version = "7.0.0", default-features = false, features = ["client"] }
+log = { version = "0.4.34", features = ["std"] }
+# OpenSSL (native-tls) instead of rustls: already in the image and cross-builds
+# without aws-lc/cmake
+rumqttc = { version = "0.25.1", default-features = false, features = ["use-native-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.151"
+signal-hook = "0.4.4"
+tempfile = "3.27.0"
+
+[profile.release]
+lto = true
+panic = "abort"

@@ -1,3 +1,4 @@
 # Copy to local.mk (gitignored) to build packages from local checkouts.
-# After changing the sources: make mobix-app-rebuild all
-MOBIX_APP_OVERRIDE_SRCDIR = $(HOME)/dev/mobix-app
+# After changing the sources: make <pkg>-rebuild all
+# (The app in app/ is always built from this tree and needs no entry here.)
+#LPRINT_OVERRIDE_SRCDIR = $(HOME)/dev/lprint
